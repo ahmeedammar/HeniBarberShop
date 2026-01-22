@@ -1,0 +1,36 @@
+.appointments-page {
+  padding: 120px 0 60px;
+}
+
+.app-table-card {
+  padding: 0;
+  overflow: hidden;
+}
+
+.appointments-list {
+  margin-top: var(--spacing-xl);
+}
+
+.empty-state {
+  text-align: center;
+  padding: var(--spacing-2xl);
+}
+
+.font-600 {
+  font-weight: 600;
+}
+
+@keyframes slideInBottom {
+  from {
+    opacity: 0;
+    transform: translateY(30px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.slide-in-bottom {
+  animation: slideInBottom 0.6s ease forwards;
+}
