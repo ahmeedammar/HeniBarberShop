@@ -37,10 +37,14 @@ app.use((err, req, res, next) => {
 });
 
 // Start server
-app.listen(PORT, () => {
-    console.log(`🚀 Server running on http://localhost:${PORT}`);
-    console.log(`📊 API available at http://localhost:${PORT}/api`);
-    console.log(`\n👤 Default admin credentials:`);
-    console.log(`   Email: admin@barbershop.com`);
-    console.log(`   Password: admin123\n`);
-});
+if (process.env.NODE_ENV !== 'production') {
+    app.listen(PORT, () => {
+        console.log(`🚀 Server running on http://localhost:${PORT}`);
+        console.log(`📊 API available at http://localhost:${PORT}/api`);
+        console.log(`\n👤 Default admin credentials:`);
+        //console.log(`   Email: admin@barbershop.com`);
+        //console.log(`   Password: admin123\n`);
+    });
+}
+
+export default app;
