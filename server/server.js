@@ -16,8 +16,12 @@ const PORT = process.env.PORT || 3001;
 app.use(cors());
 app.use(express.json());
 
-// Initialize database
-initDatabase();
+// Initialize database (Async)
+initDatabase().then(() => {
+    console.log('✅ Database Ready');
+}).catch(err => {
+    console.error('❌ Database Initialization Failed:', err);
+});
 
 // Routes
 app.use('/api/auth', authRoutes);
@@ -41,9 +45,6 @@ if (process.env.NODE_ENV !== 'production') {
     app.listen(PORT, () => {
         console.log(`🚀 Server running on http://localhost:${PORT}`);
         console.log(`📊 API available at http://localhost:${PORT}/api`);
-        console.log(`\n👤 Default admin credentials:`);
-        //console.log(`   Email: admin@barbershop.com`);
-        //console.log(`   Password: admin123\n`);
     });
 }
 

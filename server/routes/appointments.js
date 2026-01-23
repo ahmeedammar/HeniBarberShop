@@ -4,8 +4,19 @@ import { authenticateToken, requireAdmin } from '../middleware/auth.js';
 
 const router = express.Router();
 
+// Helper to normalize rows
+const normalize = (rows) => {
+    if (!rows) return rows;
+    if (Array.isArray(rows)) return rows.map(r => normalize(r));
+    const entry = {};
+    for (const key in rows) {
+        entry[key.toLowerCase()] = rows[key];
+    }
+    return entry;
+};
+
 // Get all appointments (admin only)
-router.get('/admin/appointments', authenticateToken, requireAdmin, (req, res) => {
+router.get('/admin/appointments', authenticateToken, requireAdmin, async (req, res) => {
     try {
         const { status, date } = req.query;
         let query = `
@@ -43,8 +54,8 @@ router.get('/admin/appointments', authenticateToken, requireAdmin, (req, res) =>
 
         query += ' ORDER BY a.appointment_date DESC, a.appointment_time DESC';
 
-        const appointments = db.prepare(query).all(...params);
-        res.json(appointments);
+        const appointments = await db.all(query, params);
+        res.json(normalize(appointments));
     } catch (error) {
         console.error('Error fetching appointments:', error);
         res.status(500).json({ error: 'Failed to fetch appointments' });
@@ -52,9 +63,9 @@ router.get('/admin/appointments', authenticateToken, requireAdmin, (req, res) =>
 });
 
 // Get client appointments
-router.get('/client/appointments', authenticateToken, (req, res) => {
+router.get('/client/appointments', authenticateToken, async (req, res) => {
     try {
-        const appointments = db.prepare(`
+        const appointments = await db.all(`
       SELECT 
         a.*,
         s.name as service_name,
@@ -66,9 +77,9 @@ router.get('/client/appointments', authenticateToken, (req, res) => {
       LEFT JOIN barbers b ON a.barber_id = b.id
       WHERE a.client_id = ?
       ORDER BY a.appointment_date DESC, a.appointment_time DESC
-    `).all(req.user.id);
+    `, [req.user.id]);
 
-        res.json(appointments);
+        res.json(normalize(appointments));
     } catch (error) {
         console.error('Error fetching appointments:', error);
         res.status(500).json({ error: 'Failed to fetch appointments' });
@@ -76,7 +87,7 @@ router.get('/client/appointments', authenticateToken, (req, res) => {
 });
 
 // Create appointment
-router.post('/appointments', authenticateToken, (req, res) => {
+router.post('/appointments', authenticateToken, async (req, res) => {
     try {
         const { serviceId, barberId, appointmentDate, appointmentTime, notes } = req.body;
 
@@ -84,59 +95,56 @@ router.post('/appointments', authenticateToken, (req, res) => {
             return res.status(400).json({ error: 'Service, date, and time are required' });
         }
 
-        // Check if slot is available
+        // Check availability
         let isBooked = false;
         if (barberId) {
-            const booked = db.prepare(`
+            const booked = await db.get(`
                 SELECT id FROM appointments
                 WHERE appointment_date = ? AND appointment_time = ?
                 AND barber_id = ?
                 AND status IN ('pending', 'accepted')
-            `).get(appointmentDate, appointmentTime, barberId);
+            `, [appointmentDate, appointmentTime, barberId]);
             isBooked = !!booked;
         } else {
-            const activeBarbersCount = db.prepare('SELECT COUNT(*) as count FROM barbers WHERE is_active = 1').get().count;
-            const bookedBarbersCount = db.prepare(`
+            const activeBarbers = await db.get('SELECT COUNT(*) as count FROM barbers WHERE is_active = 1');
+            const activeBarbersCount = activeBarbers.count || activeBarbers.COUNT || 0;
+
+            const bookedBarbers = await db.get(`
                 SELECT COUNT(DISTINCT barber_id) as count FROM appointments
                 WHERE appointment_date = ? AND appointment_time = ?
                 AND barber_id IS NOT NULL
                 AND status IN ('pending', 'accepted')
-            `).get(appointmentDate, appointmentTime).count;
-            const anyBarberBooked = db.prepare(`
+            `, [appointmentDate, appointmentTime]);
+            const bookedBarbersCount = bookedBarbers.count || bookedBarbers.COUNT || 0;
+
+            const anyBarberBooked = await db.get(`
                 SELECT COUNT(*) as count FROM appointments
                 WHERE appointment_date = ? AND appointment_time = ?
                 AND barber_id IS NULL
                 AND status IN ('pending', 'accepted')
-            `).get(appointmentDate, appointmentTime).count;
+            `, [appointmentDate, appointmentTime]);
+            const anyBarberBookedCount = anyBarberBooked.count || anyBarberBooked.COUNT || 0;
 
-            isBooked = (bookedBarbersCount + anyBarberBooked) >= activeBarbersCount;
+            isBooked = (bookedBarbersCount + anyBarberBookedCount) >= activeBarbersCount;
         }
 
         if (isBooked) {
             return res.status(409).json({ error: 'This time slot is no longer available' });
         }
 
-        // Create appointment
-        const result = db.prepare(`
-      INSERT INTO appointments (client_id, service_id, barber_id, appointment_date, appointment_time, notes)
-      VALUES (?, ?, ?, ?, ?, ?)
-    `).run(req.user.id, serviceId, barberId || null, appointmentDate, appointmentTime, notes || null);
+        const result = await db.run(`
+            INSERT INTO appointments (client_id, service_id, barber_id, appointment_date, appointment_time, notes)
+            VALUES (?, ?, ?, ?, ?, ?)
+        `, [req.user.id, serviceId, barberId || null, appointmentDate, appointmentTime, notes || null]);
 
-        // Create notification for admins
-        const admins = db.prepare('SELECT id FROM users WHERE role = ?').all('admin');
-        const notificationStmt = db.prepare(`
-      INSERT INTO notifications (user_id, title, message, type)
-      VALUES (?, ?, ?, ?)
-    `);
-
-        admins.forEach(admin => {
-            notificationStmt.run(
-                admin.id,
-                'New Appointment Request',
-                `New booking request for ${appointmentDate} at ${appointmentTime}`,
-                'appointment'
-            );
-        });
+        // Notifications
+        const admins = await db.all('SELECT id FROM users WHERE role = ?', ['admin']);
+        for (const admin of admins) {
+            await db.run(`
+                INSERT INTO notifications (user_id, title, message, type)
+                VALUES (?, ?, ?, ?)
+            `, [admin.id || admin.ID, 'New Appointment Request', `New booking request for ${appointmentDate} at ${appointmentTime}`, 'appointment']);
+        }
 
         res.status(201).json({
             message: 'Appointment booked successfully',
@@ -149,7 +157,7 @@ router.post('/appointments', authenticateToken, (req, res) => {
 });
 
 // Update appointment status (admin only)
-router.patch('/appointments/:id/status', authenticateToken, requireAdmin, (req, res) => {
+router.patch('/appointments/:id/status', authenticateToken, requireAdmin, async (req, res) => {
     try {
         const { id } = req.params;
         const { status, adminNotes } = req.body;
@@ -158,49 +166,51 @@ router.patch('/appointments/:id/status', authenticateToken, requireAdmin, (req, 
             return res.status(400).json({ error: 'Invalid status' });
         }
 
-        // Get appointment details
-        const appointment = db.prepare(`
-      SELECT a.*, u.id as client_id, u.full_name as client_name
-      FROM appointments a
-      JOIN users u ON a.client_id = u.id
-      WHERE a.id = ?
-    `).get(id);
+        const appointment = await db.get(`
+            SELECT a.*, u.id as client_id, u.full_name as client_name
+            FROM appointments a
+            JOIN users u ON a.client_id = u.id
+            WHERE a.id = ?
+        `, [id]);
 
         if (!appointment) {
             return res.status(404).json({ error: 'Appointment not found' });
         }
 
-        // Update appointment
-        db.prepare(`
-      UPDATE appointments
-      SET status = ?, admin_notes = ?, updated_at = CURRENT_TIMESTAMP
-      WHERE id = ?
-    `).run(status, adminNotes || null, id);
+        const appId = appointment.id || appointment.ID;
+        const clientId = appointment.client_id || appointment.CLIENT_ID;
 
-        // Create notification for client
+        await db.run(`
+            UPDATE appointments
+            SET status = ?, admin_notes = ?, updated_at = CURRENT_TIMESTAMP
+            WHERE id = ?
+        `, [status, adminNotes || null, appId]);
+
         let notificationTitle = 'Appointment Update';
         let notificationMessage = '';
+        const appDate = appointment.appointment_date || appointment.APPOINTMENT_DATE;
+        const appTime = appointment.appointment_time || appointment.APPOINTMENT_TIME;
 
         switch (status) {
             case 'accepted':
                 notificationTitle = 'Appointment Confirmed!';
-                notificationMessage = `Your appointment on ${appointment.appointment_date} at ${appointment.appointment_time} has been confirmed.`;
+                notificationMessage = `Your appointment on ${appDate} at ${appTime} has been confirmed.`;
                 break;
             case 'rejected':
                 notificationTitle = 'Appointment Declined';
-                notificationMessage = `Unfortunately, your appointment request for ${appointment.appointment_date} at ${appointment.appointment_time} could not be accommodated.`;
+                notificationMessage = `Unfortunately, your appointment request for ${appDate} at ${appTime} could not be accommodated.`;
                 break;
             case 'cancelled':
                 notificationTitle = 'Appointment Cancelled';
-                notificationMessage = `Your appointment on ${appointment.appointment_date} at ${appointment.appointment_time} has been cancelled.`;
+                notificationMessage = `Your appointment on ${appDate} at ${appTime} has been cancelled.`;
                 break;
         }
 
         if (notificationMessage) {
-            db.prepare(`
-        INSERT INTO notifications (user_id, title, message, type)
-        VALUES (?, ?, ?, ?)
-      `).run(appointment.client_id, notificationTitle, notificationMessage, 'appointment');
+            await db.run(`
+                INSERT INTO notifications (user_id, title, message, type)
+                VALUES (?, ?, ?, ?)
+            `, [clientId, notificationTitle, notificationMessage, 'appointment']);
         }
 
         res.json({ message: 'Appointment status updated successfully' });
@@ -211,78 +221,66 @@ router.patch('/appointments/:id/status', authenticateToken, requireAdmin, (req, 
 });
 
 // Get available time slots
-router.get('/available-slots', (req, res) => {
+router.get('/available-slots', async (req, res) => {
     try {
         const { date, barberId } = req.query;
+        if (!date) return res.status(400).json({ error: 'Date is required' });
 
-        if (!date) {
-            return res.status(400).json({ error: 'Date is required' });
-        }
-
-        // Get day of week (0 = Sunday, 6 = Saturday)
         const dateObj = new Date(date);
         const dayOfWeek = dateObj.getDay();
 
-        // Get working hours for this day
-        const workingHours = db.prepare(`
-      SELECT start_time, end_time
-      FROM working_hours
-      WHERE day_of_week = ? AND is_active = 1
-    `).get(dayOfWeek);
+        const workingHours = await db.get(`
+            SELECT start_time, end_time FROM working_hours
+            WHERE day_of_week = ? AND is_active = 1
+        `, [dayOfWeek]);
 
-        if (!workingHours) {
-            return res.json([]);
-        }
+        if (!workingHours) return res.json([]);
 
-        // Generate time slots (30-minute intervals)
         const slots = [];
-        const [startHour, startMin] = workingHours.start_time.split(':').map(Number);
-        const [endHour, endMin] = workingHours.end_time.split(':').map(Number);
+        const startTimeStr = workingHours.start_time || workingHours.START_TIME;
+        const endTimeStr = workingHours.end_time || workingHours.END_TIME;
+        const [startHour, startMin] = startTimeStr.split(':').map(Number);
+        const [endHour, endMin] = endTimeStr.split(':').map(Number);
 
         for (let hour = startHour; hour < endHour; hour++) {
             for (let min = 0; min < 60; min += 30) {
-                if (hour === startHour && min < startMin) continue;
-                if (hour === endHour - 1 && min >= endMin) break;
-
                 const timeSlot = `${String(hour).padStart(2, '0')}:${String(min).padStart(2, '0')}`;
 
-                // Check availability
                 let isBooked = false;
                 if (barberId) {
-                    const booked = db.prepare(`
+                    const booked = await db.get(`
                         SELECT id FROM appointments
                         WHERE appointment_date = ? AND appointment_time = ?
                         AND barber_id = ?
                         AND status IN ('pending', 'accepted')
-                    `).get(date, timeSlot, barberId);
+                    `, [date, timeSlot, barberId]);
                     isBooked = !!booked;
                 } else {
-                    // If no specific barber, check if all active barbers are booked
-                    const activeBarbersCount = db.prepare('SELECT COUNT(*) as count FROM barbers WHERE is_active = 1').get().count;
-                    const bookedBarbersCount = db.prepare(`
+                    const activeBarbers = await db.get('SELECT COUNT(*) as count FROM barbers WHERE is_active = 1');
+                    const activeBarbersCount = activeBarbers.count || activeBarbers.COUNT || 0;
+
+                    const bookedBarbers = await db.get(`
                         SELECT COUNT(DISTINCT barber_id) as count FROM appointments
                         WHERE appointment_date = ? AND appointment_time = ?
                         AND barber_id IS NOT NULL
                         AND status IN ('pending', 'accepted')
-                    `).get(date, timeSlot).count;
+                    `, [date, timeSlot]);
+                    const bookedBarbersCount = bookedBarbers.count || bookedBarbers.COUNT || 0;
 
-                    // Also check if there's an appointment with "Any Barber" (barber_id IS NULL)
-                    const anyBarberBooked = db.prepare(`
+                    const anyBarberBooked = await db.get(`
                         SELECT COUNT(*) as count FROM appointments
                         WHERE appointment_date = ? AND appointment_time = ?
                         AND barber_id IS NULL
                         AND status IN ('pending', 'accepted')
-                    `).get(date, timeSlot).count;
+                    `, [date, timeSlot]);
+                    const anyBarberBookedCount = anyBarberBooked.count || anyBarberBooked.COUNT || 0;
 
-                    isBooked = (bookedBarbersCount + anyBarberBooked) >= activeBarbersCount;
+                    isBooked = (bookedBarbersCount + anyBarberBookedCount) >= activeBarbersCount;
                 }
 
-                if (!isBooked) {
-                    slots.push(timeSlot);
-                }
+                if (!isBooked) slots.push(timeSlot);
             }
         }
-
         res.json(slots);
     } catch (error) {
         console.error('Error fetching available slots:', error);

@@ -2,6 +2,7 @@ import { Link, useLocation } from 'react-router-dom';
 import { useEffect, useState } from 'react';
 import { serviceAPI, barberAPI } from '../utils/api';
 import { useLanguage } from '../context/LanguageContext';
+import logo from '../assets/ba7.png';
 import './Home.css';
 
 const Home = () => {
@@ -45,7 +46,7 @@ const Home = () => {
         <div className="container">
           <div className="hero-content">
             <div className="hero-logo-reveal">
-              <img src="/src/assets/ba7.png" alt="Logo Reveal" className="hero-logo-big" />
+              <img src={logo} alt="Logo Reveal" className="hero-logo-big" />
             </div>
             <h1 className="hero-title fade-in">
               {t('hero_title_1')}<br />
@@ -221,7 +222,7 @@ const Home = () => {
           <div className="footer-content">
             <div className="footer-brand">
               <div className="footer-logo-container">
-                <img src="/src/assets/ba7.png" alt="BA7 Logo" className="footer-logo-img" />
+                <img src={logo} alt="BA7 Logo" className="footer-logo-img" />
               </div>
               <span className="brand-text">HENI BARBERSHOP</span>
             </div>

@@ -1,6 +1,7 @@
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useLanguage } from '../context/LanguageContext';
+import logo from '../assets/ba7.png';
 import './Navbar.css';
 
 const Navbar = () => {
@@ -19,7 +20,7 @@ const Navbar = () => {
         <div className="navbar-content">
           <Link to="/" className="navbar-brand">
             <div className="brand-logo-container">
-              <img src="/src/assets/ba7.png" alt="BA7 Logo" className="brand-logo-img animated-logo" />
+              <img src={logo} alt="BA7 Logo" className="brand-logo-img animated-logo" />
             </div>
             <span className="brand-text">HENI BARBERSHOP</span>
           </Link>

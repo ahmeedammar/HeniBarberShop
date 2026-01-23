@@ -4,11 +4,24 @@ import { authenticateToken, requireAdmin } from '../middleware/auth.js';
 
 const router = express.Router();
 
+// Helper to normalize rows (handles case sensitivity in results)
+const normalize = (rows) => {
+    if (!rows) return rows;
+    if (Array.isArray(rows)) {
+        return rows.map(r => normalize(r));
+    }
+    const entry = {};
+    for (const key in rows) {
+        entry[key.toLowerCase()] = rows[key];
+    }
+    return entry;
+};
+
 // Get all services
-router.get('/services', (req, res) => {
+router.get('/services', async (req, res) => {
     try {
-        const services = db.prepare('SELECT * FROM services WHERE is_active = 1 ORDER BY name').all();
-        res.json(services);
+        const services = await db.all('SELECT * FROM services WHERE is_active = 1 ORDER BY name');
+        res.json(normalize(services));
     } catch (error) {
         console.error('Error fetching services:', error);
         res.status(500).json({ error: 'Failed to fetch services' });
@@ -16,10 +29,10 @@ router.get('/services', (req, res) => {
 });
 
 // Get all barbers
-router.get('/barbers', (req, res) => {
+router.get('/barbers', async (req, res) => {
     try {
-        const barbers = db.prepare('SELECT * FROM barbers WHERE is_active = 1 ORDER BY name').all();
-        res.json(barbers);
+        const barbers = await db.all('SELECT * FROM barbers WHERE is_active = 1 ORDER BY name');
+        res.json(normalize(barbers));
     } catch (error) {
         console.error('Error fetching barbers:', error);
         res.status(500).json({ error: 'Failed to fetch barbers' });
@@ -27,7 +40,7 @@ router.get('/barbers', (req, res) => {
 });
 
 // Create service (admin only)
-router.post('/services', authenticateToken, requireAdmin, (req, res) => {
+router.post('/services', authenticateToken, requireAdmin, async (req, res) => {
     try {
         const { name, description, price, duration } = req.body;
 
@@ -35,10 +48,10 @@ router.post('/services', authenticateToken, requireAdmin, (req, res) => {
             return res.status(400).json({ error: 'Name, price, and duration are required' });
         }
 
-        const result = db.prepare(`
-      INSERT INTO services (name, description, price, duration)
-      VALUES (?, ?, ?, ?)
-    `).run(name, description || null, price, duration);
+        const result = await db.run(`
+            INSERT INTO services (name, description, price, duration)
+            VALUES (?, ?, ?, ?)
+        `, [name, description || null, price, duration]);
 
         res.status(201).json({
             message: 'Service created successfully',
@@ -51,7 +64,7 @@ router.post('/services', authenticateToken, requireAdmin, (req, res) => {
 });
 
 // Update service (admin only)
-router.patch('/services/:id', authenticateToken, requireAdmin, (req, res) => {
+router.patch('/services/:id', authenticateToken, requireAdmin, async (req, res) => {
     try {
         const { id } = req.params;
         const { name, description, price, duration, isActive } = req.body;
@@ -86,11 +99,11 @@ router.patch('/services/:id', authenticateToken, requireAdmin, (req, res) => {
 
         params.push(id);
 
-        db.prepare(`
-      UPDATE services
-      SET ${updates.join(', ')}
-      WHERE id = ?
-    `).run(...params);
+        await db.run(`
+            UPDATE services
+            SET ${updates.join(', ')}
+            WHERE id = ?
+        `, params);
 
         res.json({ message: 'Service updated successfully' });
     } catch (error) {
@@ -100,7 +113,7 @@ router.patch('/services/:id', authenticateToken, requireAdmin, (req, res) => {
 });
 
 // Create barber (admin only)
-router.post('/barbers', authenticateToken, requireAdmin, (req, res) => {
+router.post('/barbers', authenticateToken, requireAdmin, async (req, res) => {
     try {
         const { name, bio, imageUrl, specialty } = req.body;
 
@@ -108,10 +121,10 @@ router.post('/barbers', authenticateToken, requireAdmin, (req, res) => {
             return res.status(400).json({ error: 'Name is required' });
         }
 
-        const result = db.prepare(`
-      INSERT INTO barbers (name, bio, image_url, specialty)
-      VALUES (?, ?, ?, ?)
-    `).run(name, bio || null, imageUrl || null, specialty || null);
+        const result = await db.run(`
+            INSERT INTO barbers (name, bio, image_url, specialty)
+            VALUES (?, ?, ?, ?)
+        `, [name, bio || null, imageUrl || null, specialty || null]);
 
         res.status(201).json({
             message: 'Barber created successfully',
@@ -124,7 +137,7 @@ router.post('/barbers', authenticateToken, requireAdmin, (req, res) => {
 });
 
 // Update barber (admin only)
-router.patch('/barbers/:id', authenticateToken, requireAdmin, (req, res) => {
+router.patch('/barbers/:id', authenticateToken, requireAdmin, async (req, res) => {
     try {
         const { id } = req.params;
         const { name, bio, imageUrl, specialty, isActive } = req.body;
@@ -159,11 +172,11 @@ router.patch('/barbers/:id', authenticateToken, requireAdmin, (req, res) => {
 
         params.push(id);
 
-        db.prepare(`
-      UPDATE barbers
-      SET ${updates.join(', ')}
-      WHERE id = ?
-    `).run(...params);
+        await db.run(`
+            UPDATE barbers
+            SET ${updates.join(', ')}
+            WHERE id = ?
+        `, params);
 
         res.json({ message: 'Barber updated successfully' });
     } catch (error) {
@@ -173,10 +186,10 @@ router.patch('/barbers/:id', authenticateToken, requireAdmin, (req, res) => {
 });
 
 // Get working hours
-router.get('/working-hours', (req, res) => {
+router.get('/working-hours', async (req, res) => {
     try {
-        const hours = db.prepare('SELECT * FROM working_hours ORDER BY day_of_week').all();
-        res.json(hours);
+        const hours = await db.all('SELECT * FROM working_hours ORDER BY day_of_week');
+        res.json(normalize(hours));
     } catch (error) {
         console.error('Error fetching working hours:', error);
         res.status(500).json({ error: 'Failed to fetch working hours' });
@@ -184,7 +197,7 @@ router.get('/working-hours', (req, res) => {
 });
 
 // Update working hours (admin only)
-router.patch('/working-hours/:id', authenticateToken, requireAdmin, (req, res) => {
+router.patch('/working-hours/:id', authenticateToken, requireAdmin, async (req, res) => {
     try {
         const { id } = req.params;
         const { startTime, endTime, isActive } = req.body;
@@ -211,11 +224,11 @@ router.patch('/working-hours/:id', authenticateToken, requireAdmin, (req, res) =
 
         params.push(id);
 
-        db.prepare(`
-      UPDATE working_hours
-      SET ${updates.join(', ')}
-      WHERE id = ?
-    `).run(...params);
+        await db.run(`
+            UPDATE working_hours
+            SET ${updates.join(', ')}
+            WHERE id = ?
+        `, params);
 
         res.json({ message: 'Working hours updated successfully' });
     } catch (error) {
